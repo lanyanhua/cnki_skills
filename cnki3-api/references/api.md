@@ -10,13 +10,24 @@
 
 ## 鉴权
 
-普通用户推荐先保存一次 API Key：
+agent 使用时先检查本机是否已保存 API Key：
+
+```bash
+python scripts/cnki3_client.py key-status
+```
+
+如果返回 `configured=false`，第一步需要设置 API Key。用户可以自行运行，也可以把 key 提供给 agent 后由 agent 执行：
 
 ```bash
 python scripts/cnki3_client.py set-key ck_live_xxx
 ```
 
-保存后，搜索、详情、下载命令会自动读取这个 key，不需要再设置环境变量，也不需要每条命令都带 `--api-key`。
+保存后，搜索、详情、下载命令会自动读取这个 key，不需要再设置环境变量，也不需要每条命令都带 `--api-key`。设置好后可使用这些接口：
+
+- `health`: 检查服务状态。
+- `search`: 按 `expert` 检索 CNKI 文献列表。
+- `detail`: 根据搜索结果里的详情 URL 获取解析后的摘要、关键词、DOI 等字段。
+- `download`: 根据搜索结果里的下载字段下载全文 PDF。
 
 移除本机保存的 key：
 

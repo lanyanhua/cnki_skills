@@ -84,6 +84,16 @@ def clear_saved_api_key() -> Path:
     return path
 
 
+def saved_api_key_status() -> dict[str, Any]:
+    api_key = load_saved_api_key()
+    path = config_path()
+    return {
+        "success": True,
+        "configured": bool(api_key),
+        "config_path": str(path),
+    }
+
+
 def resolve_api_key(cli_api_key: str | None) -> str:
     return str(cli_api_key or os.getenv("CNKI3_API_KEY") or load_saved_api_key() or "").strip()
 
@@ -159,6 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     set_key = subparsers.add_parser("set-key", help="保存 API Key，只需运行一次")
     set_key.add_argument("api_key")
+    subparsers.add_parser("key-status", help="检查本机是否已保存 API Key")
     subparsers.add_parser("clear-key", help="删除本机保存的 API Key")
     subparsers.add_parser("health", help="GET /health")
 
@@ -217,6 +228,10 @@ def main(argv: list[str] | None = None) -> int:
                 indent=2,
             )
         )
+        return 0
+
+    if args.command == "key-status":
+        print(json.dumps(saved_api_key_status(), ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "health":
