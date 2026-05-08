@@ -23,7 +23,7 @@ python scripts/cnki3_client.py --api-key "$CNKI3_API_KEY" download --json-file s
 ## 调用流程
 
 1. 先跑 `health`，确认服务返回 `{"success": true, "service": "cnki3", "status": "ok"}`。
-2. 搜索时调用 `POST /api/v1/search`，优先传 `expert`，也兼容旧字段 `keyword`。常见表达式：主题 `SU=关键词`，期刊 `LY=期刊名`。
+2. 搜索时调用 `POST /api/v1/search`，优先传 `expert`，也兼容旧字段 `keyword`。`expert` 支持主题、篇名、关键词、全文、作者、作者单位、基金、摘要、来源、DOI、被引频次等字段；详细字段和组合示例见 `references/api.md` 的搜索章节。
 3. 翻页时保存响应里的 `turnpage`。同一 `expert` 服务端会缓存最新 `turnpage`，但需要可复现分页时仍应显式传回。
 4. 详情时把搜索结果的 `url0` 作为 `url`，并保留 `database`。响应会补充 `htmlText`、`abstractInfo`、`keywords`、`doi`、`infoData`。
 5. 下载时优先使用搜索结果的 `new_url`、`title`、`data_filename`、`data_dbname`、`time`；旧字段 `durl`、`documentName`、`accessionNo`、`database`、`date` 也可直接传。
