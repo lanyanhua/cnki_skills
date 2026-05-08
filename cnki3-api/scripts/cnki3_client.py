@@ -1,0 +1,251 @@
+#!/usr/bin/env python3
+"""CLI helper for the published CNKI3 API."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from typing import Any
+
+
+DEFAULT_BASE_URL = "https://nmx.pikaso.cn/cnki3"
+RATE_LIMIT_HEADERS = {
+    "X-API-Key-Prefix",
+    "X-RateLimit-Limit",
+    "X-RateLimit-Used",
+    "X-RateLimit-Period",
+    "X-Request-ID",
+}
+
+
+def normalize_base_url(base_url: str | None) -> str:
+    value = (base_url or DEFAULT_BASE_URL).strip().rstrip("/")
+    if value.endswith("/health"):
+        value = value[: -len("/health")]
+    return value.rstrip("/")
+
+
+def load_json(path: str | None) -> dict[str, Any]:
+    if not path:
+        return {}
+    if path == "-":
+        text = sys.stdin.read()
+    else:
+        with open(path, "r", encoding="utf-8") as handle:
+            text = handle.read()
+    if not text.strip():
+        return {}
+    payload = json.loads(text)
+    if not isinstance(payload, dict):
+        raise SystemExit("JSON input must be an object.")
+    return payload
+
+
+def put_if_present(payload: dict[str, Any], key: str, value: Any) -> None:
+    if value is not None and value != "":
+        payload[key] = value
+
+
+def parse_body(raw_body: bytes, headers: dict[str, str]) -> Any:
+    charset = "utf-8"
+    content_type = headers.get("Content-Type", "")
+    if "charset=" in content_type:
+        charset = content_type.rsplit("charset=", 1)[-1].split(";", 1)[0].strip()
+    text = raw_body.decode(charset or "utf-8", errors="replace")
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return text
+
+
+def request_json(
+    *,
+    base_url: str,
+    method: str,
+    path: str,
+    payload: dict[str, Any] | None = None,
+    api_key: str | None = None,
+    admin_token: str | None = None,
+    timeout: float = 60,
+) -> tuple[int, dict[str, str], Any]:
+    if not path.startswith("/"):
+        path = "/" + path
+    url = normalize_base_url(base_url) + path
+    headers = {"Accept": "application/json"}
+    data = None
+    if payload is not None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    if api_key:
+        headers["X-API-Key"] = api_key
+    if admin_token:
+        headers["X-Admin-Token"] = admin_token
+
+    request = urllib.request.Request(url, data=data, headers=headers, method=method.upper())
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            response_headers = dict(response.headers.items())
+            return response.status, response_headers, parse_body(response.read(), response_headers)
+    except urllib.error.HTTPError as error:
+        response_headers = dict(error.headers.items())
+        return error.code, response_headers, parse_body(error.read(), response_headers)
+    except urllib.error.URLError as error:
+        return 0, {}, {"success": False, "error": str(error.reason), "code": "network_error"}
+
+
+def output_response(status: int, headers: dict[str, str], body: Any, *, include_meta: bool) -> int:
+    if include_meta or status >= 400:
+        selected_headers = {name: value for name, value in headers.items() if name in RATE_LIMIT_HEADERS}
+        result: Any = {"status_code": status, "headers": selected_headers, "body": body}
+    else:
+        result = body
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if status < 400 else 1
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Call the published CNKI3 API.")
+    parser.add_argument("--base-url", default=os.getenv("CNKI3_BASE_URL", DEFAULT_BASE_URL))
+    parser.add_argument("--api-key", default=os.getenv("CNKI3_API_KEY"))
+    parser.add_argument("--admin-token", default=os.getenv("CNKI3_ADMIN_TOKEN"))
+    parser.add_argument("--timeout", type=float, default=float(os.getenv("CNKI3_TIMEOUT", "60")))
+    parser.add_argument("--meta", action="store_true", help="include status code and selected response headers")
+
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers.add_parser("health", help="GET /health")
+
+    search = subparsers.add_parser("search", help="POST /api/v1/search")
+    search.add_argument("--json-file")
+    search.add_argument("--expert")
+    search.add_argument("--keyword")
+    search.add_argument("--dates")
+    search.add_argument("--dated")
+    search.add_argument("--page-num", type=int)
+    search.add_argument("--page-size", type=int)
+    search.add_argument("--sort-field")
+    search.add_argument("--turnpage")
+
+    detail = subparsers.add_parser("detail", help="POST /api/v1/detail")
+    detail.add_argument("--json-file")
+    detail.add_argument("--url")
+    detail.add_argument("--database")
+
+    download = subparsers.add_parser("download", help="POST /api/v1/download")
+    download.add_argument("--json-file")
+    download.add_argument("--new-url")
+    download.add_argument("--durl")
+    download.add_argument("--title")
+    download.add_argument("--document-name")
+    download.add_argument("--data-filename")
+    download.add_argument("--accession-no")
+    download.add_argument("--data-dbname")
+    download.add_argument("--database")
+    download.add_argument("--time")
+    download.add_argument("--date")
+
+    admin = subparsers.add_parser("admin", help="Call /admin/api/*")
+    admin.add_argument("path", help="bootstrap, plans, api-keys, access-logs, usage, or a full /admin/api path")
+    admin.add_argument("--method", default="GET", choices=["GET", "POST", "PATCH", "PUT", "DELETE"])
+    admin.add_argument("--json-file")
+    admin.add_argument("--limit", type=int)
+    return parser
+
+
+def admin_path(raw_path: str, limit: int | None) -> str:
+    if raw_path.startswith("/"):
+        path = raw_path
+    else:
+        path = "/admin/api/" + raw_path.lstrip("/")
+    if limit is not None:
+        separator = "&" if "?" in path else "?"
+        path = path + separator + urllib.parse.urlencode({"limit": limit})
+    return path
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.command == "health":
+        status, headers, body = request_json(
+            base_url=args.base_url,
+            method="GET",
+            path="/health",
+            timeout=args.timeout,
+        )
+        return output_response(status, headers, body, include_meta=args.meta)
+
+    if args.command == "search":
+        payload = load_json(args.json_file)
+        put_if_present(payload, "expert", args.expert)
+        put_if_present(payload, "keyword", args.keyword)
+        put_if_present(payload, "dates", args.dates)
+        put_if_present(payload, "dated", args.dated)
+        put_if_present(payload, "pageNum", args.page_num)
+        put_if_present(payload, "pageSize", args.page_size)
+        put_if_present(payload, "sortField", args.sort_field)
+        put_if_present(payload, "turnpage", args.turnpage)
+        if not payload.get("expert") and not payload.get("keyword"):
+            parser.error("search requires --expert, --keyword, or a JSON file containing one of them")
+        path = "/api/v1/search"
+        method = "POST"
+        api_key = args.api_key
+        admin_token = None
+    elif args.command == "detail":
+        payload = load_json(args.json_file)
+        put_if_present(payload, "url", args.url)
+        put_if_present(payload, "database", args.database)
+        if not payload.get("url") and not payload.get("url0"):
+            parser.error("detail requires --url or a JSON file containing url/url0")
+        path = "/api/v1/detail"
+        method = "POST"
+        api_key = args.api_key
+        admin_token = None
+    elif args.command == "download":
+        payload = load_json(args.json_file)
+        put_if_present(payload, "new_url", args.new_url)
+        put_if_present(payload, "durl", args.durl)
+        put_if_present(payload, "title", args.title)
+        put_if_present(payload, "documentName", args.document_name)
+        put_if_present(payload, "data_filename", args.data_filename)
+        put_if_present(payload, "accessionNo", args.accession_no)
+        put_if_present(payload, "data_dbname", args.data_dbname)
+        put_if_present(payload, "database", args.database)
+        put_if_present(payload, "time", args.time)
+        put_if_present(payload, "date", args.date)
+        if not payload.get("new_url") and not payload.get("durl"):
+            parser.error("download requires --new-url, --durl, or a JSON file containing one of them")
+        path = "/api/v1/download"
+        method = "POST"
+        api_key = args.api_key
+        admin_token = None
+    elif args.command == "admin":
+        payload = load_json(args.json_file) if args.json_file else None
+        path = admin_path(args.path, args.limit)
+        method = args.method
+        api_key = None
+        admin_token = args.admin_token
+    else:
+        parser.error(f"unknown command: {args.command}")
+
+    status, headers, body = request_json(
+        base_url=args.base_url,
+        method=method,
+        path=path,
+        payload=payload,
+        api_key=api_key,
+        admin_token=admin_token,
+        timeout=args.timeout,
+    )
+    return output_response(status, headers, body, include_meta=args.meta)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
