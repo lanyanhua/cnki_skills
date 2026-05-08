@@ -10,14 +10,34 @@
 
 ## 鉴权
 
-业务接口默认开启 API Key 鉴权。任选一种传法：
+普通用户推荐先保存一次 API Key：
+
+```bash
+python scripts/cnki3_client.py set-key ck_live_xxx
+```
+
+保存后，搜索、详情、下载命令会自动读取这个 key，不需要再设置环境变量，也不需要每条命令都带 `--api-key`。
+
+移除本机保存的 key：
+
+```bash
+python scripts/cnki3_client.py clear-key
+```
+
+一次性调用时也可以直接传：
+
+```bash
+python scripts/cnki3_client.py --api-key ck_live_xxx search --expert "SU=数字经济"
+```
+
+如果直接调用 HTTP 接口，任选一种 header 传法：
 
 ```bash
 X-API-Key: ck_live_xxx
 Authorization: Bearer ck_live_xxx
 ```
 
-源码也兼容 query/body 里的 `api_key` 或 `apiKey`，但调用时优先用 header。服务端会在进入业务处理前移除 body 内的 `api_key`/`apiKey`，避免透传给下载或详情逻辑。
+源码也兼容 query/body 里的 `api_key` 或 `apiKey`，但调用时优先用 CLI 保存的 key、`--api-key` 或 header。不要把 API Key 写进项目文件。
 
 ## 搜索
 
@@ -153,13 +173,13 @@ Authorization: Bearer ck_live_xxx
 }
 ```
 
-下载逻辑复用 `cnki2.ettsg`，并受环境变量 `CNKI_DOWNLOAD_DIR`、`CNKI_ETTSG_USERNAME`、`CNKI_ETTSG_PASSWORD`、`CNKI_ETTSG_BASE_URL` 影响。
+下载由发布服务处理，调用方只需要关注响应里的 `file_path` 和 `relative_path`。
 
-## 运行环境变量
+## 可选 CLI 参数
 
-- `CNKI3_BASE_URL`: 覆盖默认发布地址。
-- `CNKI3_API_KEY`: 用户 API Key。
-- `CNKI3_TIMEOUT`: CLI 请求超时秒数，默认 `60`。
+- `--base-url`: 覆盖默认发布地址。
+- `--timeout`: 请求超时秒数，默认 `60`。
+- `--api-key`: 只在本次命令使用指定 key；普通用户优先用 `set-key`。
 
 ## 错误和限额
 

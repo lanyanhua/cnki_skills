@@ -9,6 +9,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 
@@ -20,6 +21,10 @@ RATE_LIMIT_HEADERS = {
     "X-RateLimit-Period",
     "X-Request-ID",
 }
+
+
+def config_path() -> Path:
+    return Path.home() / ".cnki3" / "config.json"
 
 
 def normalize_base_url(base_url: str | None) -> str:
@@ -43,6 +48,44 @@ def load_json(path: str | None) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise SystemExit("JSON input must be an object.")
     return payload
+
+
+def load_saved_api_key() -> str:
+    path = config_path()
+    if not path.exists():
+        return ""
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("api_key") or "").strip()
+
+
+def save_api_key(api_key: str) -> Path:
+    api_key = str(api_key or "").strip()
+    if not api_key:
+        raise SystemExit("API Key 不能为空。")
+    path = config_path()
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump({"api_key": api_key}, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+    os.chmod(path, 0o600)
+    return path
+
+
+def clear_saved_api_key() -> Path:
+    path = config_path()
+    if path.exists():
+        path.unlink()
+    return path
+
+
+def resolve_api_key(cli_api_key: str | None) -> str:
+    return str(cli_api_key or os.getenv("CNKI3_API_KEY") or load_saved_api_key() or "").strip()
 
 
 def put_if_present(payload: dict[str, Any], key: str, value: Any) -> None:
@@ -93,7 +136,7 @@ def request_json(
         response_headers = dict(error.headers.items())
         return error.code, response_headers, parse_body(error.read(), response_headers)
     except urllib.error.URLError as error:
-        return 0, {}, {"success": False, "error": str(error.reason), "code": "network_error"}
+        return 599, {}, {"success": False, "error": str(error.reason), "code": "network_error"}
 
 
 def output_response(status: int, headers: dict[str, str], body: Any, *, include_meta: bool) -> int:
@@ -107,13 +150,16 @@ def output_response(status: int, headers: dict[str, str], body: Any, *, include_
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Call the published CNKI3 API.")
+    parser = argparse.ArgumentParser(description="调用 CNKI3 用户接口。")
     parser.add_argument("--base-url", default=os.getenv("CNKI3_BASE_URL", DEFAULT_BASE_URL))
-    parser.add_argument("--api-key", default=os.getenv("CNKI3_API_KEY"))
+    parser.add_argument("--api-key", help="只在本次命令中使用这个 API Key")
     parser.add_argument("--timeout", type=float, default=float(os.getenv("CNKI3_TIMEOUT", "60")))
-    parser.add_argument("--meta", action="store_true", help="include status code and selected response headers")
+    parser.add_argument("--meta", action="store_true", help="输出状态码和响应头")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
+    set_key = subparsers.add_parser("set-key", help="保存 API Key，只需运行一次")
+    set_key.add_argument("api_key")
+    subparsers.add_parser("clear-key", help="删除本机保存的 API Key")
     subparsers.add_parser("health", help="GET /health")
 
     search = subparsers.add_parser("search", help="POST /api/v1/search")
@@ -151,6 +197,28 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    if args.command == "set-key":
+        path = save_api_key(args.api_key)
+        print(
+            json.dumps(
+                {"success": True, "message": "API Key 已保存。", "config_path": str(path)},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+
+    if args.command == "clear-key":
+        path = clear_saved_api_key()
+        print(
+            json.dumps(
+                {"success": True, "message": "API Key 已删除。", "config_path": str(path)},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+
     if args.command == "health":
         status, headers, body = request_json(
             base_url=args.base_url,
@@ -174,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("search requires --expert, --keyword, or a JSON file containing one of them")
         path = "/api/v1/search"
         method = "POST"
-        api_key = args.api_key
+        api_key = resolve_api_key(args.api_key)
     elif args.command == "detail":
         payload = load_json(args.json_file)
         put_if_present(payload, "url", args.url)
@@ -183,7 +251,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("detail requires --url or a JSON file containing url/url0")
         path = "/api/v1/detail"
         method = "POST"
-        api_key = args.api_key
+        api_key = resolve_api_key(args.api_key)
     elif args.command == "download":
         payload = load_json(args.json_file)
         put_if_present(payload, "new_url", args.new_url)
@@ -200,9 +268,12 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("download requires --new-url, --durl, or a JSON file containing one of them")
         path = "/api/v1/download"
         method = "POST"
-        api_key = args.api_key
+        api_key = resolve_api_key(args.api_key)
     else:
         parser.error(f"unknown command: {args.command}")
+
+    if not api_key:
+        parser.error("未设置 API Key。请先运行一次: python scripts/cnki3_client.py set-key ck_live_xxx")
 
     status, headers, body = request_json(
         base_url=args.base_url,
