@@ -1,6 +1,6 @@
 ---
 name: cnki3-api
-description: "Use when Codex needs to call or maintain the published CNKI3 service at https://nmx.pikaso.cn/cnki3 for CNKI literature search, detail parsing, PDF download, API key quota handling, admin plan/key management, health checks, or workflows derived from /Users/lyh/IdeaProjects/qikan_reptile/new/cnki3."
+description: "Use when Codex needs to call the published CNKI3 user service at https://nmx.pikaso.cn/cnki3 for CNKI literature search, detail parsing, PDF download, API key usage, quota error handling, or health checks."
 ---
 
 # CNKI3 API
@@ -16,10 +16,9 @@ python scripts/cnki3_client.py health
 python scripts/cnki3_client.py --api-key "$CNKI3_API_KEY" search --expert "SU=数字经济" --dates 2022-01-01 --dated 2024-12-31 --page-num 1 --page-size 20
 python scripts/cnki3_client.py --api-key "$CNKI3_API_KEY" detail --json-file search-row.json
 python scripts/cnki3_client.py --api-key "$CNKI3_API_KEY" download --json-file search-row.json
-python scripts/cnki3_client.py --admin-token "$CNKI3_ADMIN_TOKEN" admin bootstrap
 ```
 
-业务接口默认需要 API Key。先从用户、环境变量 `CNKI3_API_KEY`、或现有安全配置中取得 key；不要编造 key。管理接口可能需要 `CNKI3_ADMIN_TOKEN`，用 `X-Admin-Token` 传递。
+接口默认需要 API Key。先从用户、环境变量 `CNKI3_API_KEY`、或现有安全配置中取得 key；不要编造 key，也不要把 key 写进代码或提交到 Git。
 
 ## 调用流程
 
@@ -33,13 +32,8 @@ python scripts/cnki3_client.py --admin-token "$CNKI3_ADMIN_TOKEN" admin bootstra
 
 成功鉴权后，响应头会包含 `X-API-Key-Prefix`、`X-RateLimit-Limit`、`X-RateLimit-Used`、`X-RateLimit-Period`。常见错误码包括 `missing_api_key`、`invalid_api_key`、`api_key_disabled`、`api_key_expired`、`plan_missing`、`plan_disabled`、`quota_disabled`、`quota_exceeded`、`database_unavailable`。
 
-注意：鉴权在业务 handler 前消耗额度并记录访问日志。遇到 `quota_exceeded` 不要盲目重试；先查看 `reset_at` 或切换有效套餐/API Key。
+遇到 `quota_exceeded` 不要盲目重试；先查看 `reset_at`，或让用户联系服务提供方处理额度/API Key。
 
 ## 参考资料
 
-- 需要完整接口字段、curl 示例和管理接口时，读取 `references/api.md`。
-- 需要理解原项目的爬取、同步、拆分、并发和维护约束时，读取 `references/workflows.md`。
-
-## 维护约束
-
-如果修改 `/Users/lyh/IdeaProjects/qikan_reptile/new/cnki3` 源码，同一业务流程中多个步骤会修改同一张表或同一条主记录时，优先合并成一次更新。确实需要多次写库时，必须用中文注释说明写入时点差异、并发影响和不能合并的原因。
+- 需要完整接口字段、调用示例和错误说明时，读取 `references/api.md`。

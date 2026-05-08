@@ -8,7 +8,6 @@ import json
 import os
 import sys
 import urllib.error
-import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -72,7 +71,6 @@ def request_json(
     path: str,
     payload: dict[str, Any] | None = None,
     api_key: str | None = None,
-    admin_token: str | None = None,
     timeout: float = 60,
 ) -> tuple[int, dict[str, str], Any]:
     if not path.startswith("/"):
@@ -85,8 +83,6 @@ def request_json(
         headers["Content-Type"] = "application/json"
     if api_key:
         headers["X-API-Key"] = api_key
-    if admin_token:
-        headers["X-Admin-Token"] = admin_token
 
     request = urllib.request.Request(url, data=data, headers=headers, method=method.upper())
     try:
@@ -114,7 +110,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Call the published CNKI3 API.")
     parser.add_argument("--base-url", default=os.getenv("CNKI3_BASE_URL", DEFAULT_BASE_URL))
     parser.add_argument("--api-key", default=os.getenv("CNKI3_API_KEY"))
-    parser.add_argument("--admin-token", default=os.getenv("CNKI3_ADMIN_TOKEN"))
     parser.add_argument("--timeout", type=float, default=float(os.getenv("CNKI3_TIMEOUT", "60")))
     parser.add_argument("--meta", action="store_true", help="include status code and selected response headers")
 
@@ -149,24 +144,7 @@ def build_parser() -> argparse.ArgumentParser:
     download.add_argument("--database")
     download.add_argument("--time")
     download.add_argument("--date")
-
-    admin = subparsers.add_parser("admin", help="Call /admin/api/*")
-    admin.add_argument("path", help="bootstrap, plans, api-keys, access-logs, usage, or a full /admin/api path")
-    admin.add_argument("--method", default="GET", choices=["GET", "POST", "PATCH", "PUT", "DELETE"])
-    admin.add_argument("--json-file")
-    admin.add_argument("--limit", type=int)
     return parser
-
-
-def admin_path(raw_path: str, limit: int | None) -> str:
-    if raw_path.startswith("/"):
-        path = raw_path
-    else:
-        path = "/admin/api/" + raw_path.lstrip("/")
-    if limit is not None:
-        separator = "&" if "?" in path else "?"
-        path = path + separator + urllib.parse.urlencode({"limit": limit})
-    return path
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -197,7 +175,6 @@ def main(argv: list[str] | None = None) -> int:
         path = "/api/v1/search"
         method = "POST"
         api_key = args.api_key
-        admin_token = None
     elif args.command == "detail":
         payload = load_json(args.json_file)
         put_if_present(payload, "url", args.url)
@@ -207,7 +184,6 @@ def main(argv: list[str] | None = None) -> int:
         path = "/api/v1/detail"
         method = "POST"
         api_key = args.api_key
-        admin_token = None
     elif args.command == "download":
         payload = load_json(args.json_file)
         put_if_present(payload, "new_url", args.new_url)
@@ -225,13 +201,6 @@ def main(argv: list[str] | None = None) -> int:
         path = "/api/v1/download"
         method = "POST"
         api_key = args.api_key
-        admin_token = None
-    elif args.command == "admin":
-        payload = load_json(args.json_file) if args.json_file else None
-        path = admin_path(args.path, args.limit)
-        method = args.method
-        api_key = None
-        admin_token = args.admin_token
     else:
         parser.error(f"unknown command: {args.command}")
 
@@ -241,7 +210,6 @@ def main(argv: list[str] | None = None) -> int:
         path=path,
         payload=payload,
         api_key=api_key,
-        admin_token=admin_token,
         timeout=args.timeout,
     )
     return output_response(status, headers, body, include_meta=args.meta)
