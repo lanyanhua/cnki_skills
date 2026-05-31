@@ -1,4 +1,4 @@
 interface:
   display_name: "CNKI3 API"
-  short_description: "调用 CNKI3 检索、详情与下载接口"
-  default_prompt: "Use $cnki3-api to search CNKI literature, fetch details, or download PDFs through the published CNKI3 API."
+  short_description: "调用 CNKI3 检索、详情与服务端下载接口"
+  default_prompt: "Use $cnki3-api to search CNKI literature, fetch details, or trigger server-side PDF downloads through the published CNKI3 API."

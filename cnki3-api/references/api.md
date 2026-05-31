@@ -27,7 +27,7 @@ python scripts/cnki3_client.py set-key ck_live_xxx
 - `health`: 检查服务状态。
 - `search`: 按 `expert` 检索 CNKI 文献列表。
 - `detail`: 根据搜索结果里的详情 URL 获取解析后的摘要、关键词、DOI 等字段。
-- `download`: 根据搜索结果里的下载字段下载全文 PDF。
+- `download`: 根据搜索结果里的下载字段触发全文 PDF 下载。若服务端返回文件流、临时 URL 或 base64 内容，CLI 可用 `--output` 保存到调用方本机；若只返回服务端路径，公开技能包无法回取 PDF。
 
 移除本机保存的 key：
 
@@ -164,6 +164,14 @@ Authorization: Bearer ck_live_xxx
 
 `POST /api/v1/download`
 
+如果目标是把 PDF 发给客户端，服务端需要满足以下任一契约：
+
+- `POST /api/v1/download` 直接返回 `application/pdf` 或 `application/octet-stream`，并建议带 `Content-Disposition: attachment; filename="xxx.pdf"`。
+- `POST /api/v1/download` 返回 JSON，包含 `download_url`、`file_url` 或 `signed_url`，客户端再 GET 该地址获取 PDF。
+- `POST /api/v1/download` 返回 JSON，包含 `file_base64` 或 `content_base64`，客户端解码保存。
+
+旧响应里的 `file_path` / `relative_path` 只是发布服务侧路径，通常不是调用方本机可直接读取的路径。
+
 请求字段：
 
 | 新字段 | 旧字段兼容 | 说明 |
@@ -184,13 +192,22 @@ Authorization: Bearer ck_live_xxx
 }
 ```
 
-下载由发布服务处理，调用方只需要关注响应里的 `file_path` 和 `relative_path`。
+下载由发布服务处理。调用方只能看到响应里的 `file_path` 和 `relative_path`；如需拿到本地 PDF，服务方需要额外开放流式下载、临时下载 URL 或文件回取接口。
+
+保存到调用方本机：
+
+```bash
+python scripts/cnki3_client.py download --json-file search-row.json --output ./downloads/
+```
+
+如果服务端仍只返回 `file_path` / `relative_path`，`--output` 会返回 `server_side_path_only` 错误，提示需要服务端开放文件流、临时下载 URL 或 base64 文件内容。
 
 ## 可选 CLI 参数
 
 - `--base-url`: 覆盖默认发布地址。
 - `--timeout`: 请求超时秒数，默认 `60`。
 - `--api-key`: 只在本次命令使用指定 key；普通用户优先用 `set-key`。
+- `download --output`: 保存服务端返回或回取到的 PDF；可传文件路径或目录。
 
 ## 错误和限额
 
